@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+
+FROM python:3.11-slim-bookworm AS builder
+
+ARG TENSEAL_TAG=v0.3.17
+ARG BUILD_JOBS=1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS} \
+    MAKEFLAGS=-j${BUILD_JOBS}
+
+# This runs as root inside the build container.
+# It does not require sudo or package installation on the Pi host.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      git \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/tenseal
+
+RUN git clone \
+      --depth 1 \
+      --branch "${TENSEAL_TAG}" \
+      https://github.com/OpenMined/TenSEAL.git .
+
+RUN python -m pip install --upgrade \
+      pip \
+      "setuptools>=77" \
+      wheel
+
+RUN python -m pip wheel \
+      --no-build-isolation \
+      --no-deps \
+      --wheel-dir /wheels \
+      .
+
+# Optional target for exporting the compiled ARM64 wheel.
+FROM scratch AS wheel
+COPY --from=builder /wheels /
+
+# Small runtime image without compilers or source code.
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY --from=builder /wheels /wheels
+
+RUN python -m pip install numpy /wheels/tenseal-*.whl \
+ && rm -rf /wheels
+
+WORKDIR /app
+CMD ["python"]
+
