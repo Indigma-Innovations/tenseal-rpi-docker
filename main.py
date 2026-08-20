@@ -1,4 +1,3 @@
-# main.py
 import tenseal as ts
 
 context = ts.context(
